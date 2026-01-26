@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <title>615マップ（復旧版）</title>
+    <title>615マップ</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; width: 100%; }
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; }
         #map { height: 100vh; width: 100vw; position: absolute; top: 0; left: 0; z-index: 1; }
         .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); width: 220px; }
         input, select { width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        button { width: 100%; padding: 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        button { width: 100%; padding: 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 5px; }
         .del-btn { background: #FF5252; color: white; border: none; padding: 6px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; }
         .edit-btn { background: #4CAF50; color: white; border: none; padding: 6px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; }
     </style>
@@ -19,7 +19,12 @@
 
 <div class="ui-panel">
     <input type="text" id="search" placeholder="名前・メモを検索..." oninput="renderMarkers()">
-    <select id="tag-filter" onchange="renderMarkers()"><option value="">すべてのタグ</option></select>
+    <select id="tag-filter" onchange="renderMarkers()">
+        <option value="">すべてのタグ</option>
+        <option value="ゴミ箱">ゴミ箱</option>
+        <option value="給水所">給水所</option>
+        <option value="トイレ">トイレ</option>
+    </select>
     <button onclick="map.locate({setView: true, maxZoom: 16})">現在地を表示</button>
 </div>
 
@@ -42,7 +47,6 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    // 地図の初期化を確実に行う
     const map = L.map('map').setView([35.676, 139.765], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap contributors'
@@ -51,20 +55,28 @@
     const markersLayer = L.layerGroup().addTo(map);
     let allData = [];
 
-    // Firebaseデータのリアルタイム取得
+    // データのリアルタイム取得
     db.collection("bins").onSnapshot(snap => {
         allData = [];
-        const tagSet = new Set();
+        const bounds = L.latLngBounds(); // 全データが収まる範囲を計算用
+        
         snap.forEach(doc => {
             const d = doc.data();
-            allData.push({ id: doc.id, ...d });
-            if (d.tag) tagSet.add(d.tag);
+            // 「テスト」タグは除外する
+            if (d.tag !== "テスト") {
+                allData.push({ id: doc.id, ...d });
+                if (d.lat && d.lng) bounds.extend([d.lat, d.lng]);
+            }
         });
-        updateTagList(tagSet);
+
         renderMarkers();
+
+        // 読み込み時にデータがある場合、全ピンが見える位置に地図を移動
+        if (!bounds.isEmpty()) {
+            map.fitBounds(bounds, {padding: [50, 50]});
+        }
     }, err => {
         console.error("Firebase Error:", err);
-        alert("データの読み込みに失敗しました。Firebaseのルールを確認してください。");
     });
 
     function renderMarkers() {
@@ -74,22 +86,24 @@
 
         allData.forEach(d => {
             const matchSearch = d.name.toLowerCase().includes(searchTxt) || (d.memo && d.memo.toLowerCase().includes(searchTxt));
-            const matchTag = !selectedTag || d.tag === selectedTag;
+            // タグの絞り込み（「給水」など部分一致でもOKにする）
+            const matchTag = !selectedTag || (d.tag && d.tag.includes(selectedTag));
 
             if (matchSearch && matchTag) {
-                let color = "#FFA000"; 
-                if (d.tag?.includes("ゴミ")) color = "#FF5252";
-                if (d.tag?.includes("トイレ")) color = "#448AFF";
+                let color = "#FFA000"; // その他：オレンジ
+                if (d.tag?.includes("ゴミ")) color = "#FF5252"; // 赤
+                if (d.tag?.includes("トイレ")) color = "#448AFF"; // 青
+                if (d.tag?.includes("給水")) color = "#00BCD4"; // 水色
                 
                 const icon = L.divIcon({
-                    html: `<div style="background:${color}; width:14px; height:14px; border:2px solid white; border-radius:50%; box-shadow:0 0 5px rgba(0,0,0,0.3);"></div>`,
+                    html: `<div style="background:${color}; width:16px; height:16px; border:2px solid white; border-radius:50%; box-shadow:0 0 5px rgba(0,0,0,0.3);"></div>`,
                     className: ''
                 });
 
                 const popupContent = `
                     <div style="min-width:150px">
                         <b>${d.name}</b><br><small>タグ: ${d.tag}</small>
-                        <p style="margin:5px 0">${d.memo || 'メモなし'}</p>
+                        <p style="margin:5px 0; font-size:12px;">${d.memo || 'メモなし'}</p>
                         <button class="edit-btn" onclick="editPin('${d.id}')">編集</button>
                         <button class="del-btn" onclick="deletePin('${d.id}')">削除</button>
                     </div>
@@ -99,13 +113,15 @@
         });
     }
 
+    // 地図クリックで新規追加
     map.on('click', async e => {
         const name = prompt("場所の名前を入力:"); if (!name) return;
-        const tag = prompt("タグ（ゴミ箱/トイレ など）:", "ゴミ箱");
+        const tag = prompt("タグ（ゴミ箱 / 給水所 / トイレ）:", "ゴミ箱");
         const memo = prompt("メモ（任意）:");
         await db.collection("bins").add({
             lat: e.latlng.lat, lng: e.latlng.lng,
-            name: name, tag: tag || "未分類", memo: memo || ""
+            name: name, tag: tag || "未分類", memo: memo || "",
+            createdAt: firebase.firestore.FieldValue.serverTimestamp()
         });
     });
 
@@ -122,120 +138,6 @@
             await db.collection("bins").doc(id).delete();
         }
     };
-
-    function updateTagList(tags) {
-        const filter = document.getElementById('tag-filter');
-        const current = filter.value;
-        filter.innerHTML = '<option value="">すべてのタグ</option>';
-        tags.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t; opt.textContent = t;
-            filter.appendChild(opt);
-        });
-        filter.value = current;
-    }
-
-// --- 一括インポート用関数（データを入れたら消してOK） ---
-async function importKML() {
-    const kmlText = `ここにKMLの中身を全部貼り付けます`; 
-    // ※ 実際にはこの下の実行コードを使って、あなたのKMLを解析して流し込みます。
-    
-    const parser = new DOMParser();
-    const kml = parser.parseFromString(kmlText, "text/xml");
-    const folders = kml.querySelectorAll("Folder");
-
-    for (const folder of folders) {
-        const tagName = folder.querySelector("name").textContent; // 「トイレ」など
-        const placemarks = folder.querySelectorAll("Placemark");
-
-        for (const p of placemarks) {
-            const name = p.querySelector("name")?.textContent || "名称未設定";
-            const coords = p.querySelector("coordinates").textContent.trim().split(",");
-            const lng = parseFloat(coords[0]);
-            const lat = parseFloat(coords[1]);
-            const memo = p.querySelector("description")?.textContent || "";
-
-            // Firestoreに保存
-            await db.collection("bins").add({
-                name: name,
-                tag: tagName,
-                lat: lat,
-                lng: lng,
-                memo: memo,
-                createdAt: new Date()
-            });
-        }
-    }
-    alert("インポートが完了しました！ページをリロードしてください。");
-}
-
-// 実行ボタンを画面に出す（コンソールから実行してもOK）
-// importKML();
-    
 </script>
-
-<div id="importer-tool" style="position:fixed; bottom:20px; right:20px; z-index:9999; background:yellow; padding:15px; border:2px solid red; border-radius:10px; box-shadow: 0 0 10px rgba(0,0,0,0.5); font-family:sans-serif;">
-    <p style="margin:0 0 10px 0; font-size:14px; font-weight:bold; color:black;">⚠️一括登録ツール</p>
-    <input type="file" id="kml-file" accept=".kml" style="display:block; margin-bottom:10px;">
-    <button onclick="startImport()" style="background:red; color:white; border:none; padding:10px; cursor:pointer; font-weight:bold; width:100%;">Firebaseへ登録開始</button>
-    <p id="import-status" style="margin-top:10px; font-size:12px; color:black;"></p>
-</div>
-
-<script>
-async function startImport() {
-    const fileInput = document.getElementById('kml-file');
-    const status = document.getElementById('import-status');
-    if (!fileInput.files.length) return alert("KMLファイルを選んでください");
-
-    status.innerText = "読み込み中...";
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-        try {
-            const parser = new DOMParser();
-            const kml = parser.parseFromString(e.target.result, "text/xml");
-            const folders = kml.querySelectorAll("Folder");
-            let count = 0;
-
-            for (const folder of folders) {
-                const folderName = folder.querySelector("name")?.textContent || "未分類";
-                const placemarks = folder.querySelectorAll("Placemark");
-
-                for (const p of placemarks) {
-                    const name = p.querySelector("name")?.textContent || "名称未設定";
-                    const coordText = p.querySelector("coordinates")?.textContent.trim();
-                    if (!coordText) continue;
-
-                    // 座標の抽出 (経度,緯度,高度)
-                    const coords = coordText.split(/[\s,]+/);
-                    const lng = parseFloat(coords[0]);
-                    const lat = parseFloat(coords[1]);
-                    
-                    // 説明（メモ）の抽出
-                    const memo = p.querySelector("description")?.textContent || "";
-
-                    // Firestoreの "bins" コレクションへ保存
-                    await db.collection("bins").add({
-                        name: name,
-                        tag: folderName, // 「ゴミ箱」「トイレ」「給水所」が自動で入る
-                        lat: lat,
-                        lng: lng,
-                        memo: memo,
-                        createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                    });
-                    count++;
-                    status.innerText = `登録中... (${count}件完了)`;
-                }
-            }
-            alert(count + "件のデータを登録しました！ページを更新して確認してください。");
-            document.getElementById('importer-tool').style.display = 'none'; // 終わったら隠す
-        } catch (err) {
-            console.error(err);
-            alert("エラーが発生しました。コンソールを確認してください。");
-        }
-    };
-    reader.readAsText(fileInput.files[0]);
-}
-</script>
-    
 </body>
 </html>
