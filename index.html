@@ -1,32 +1,28 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <title>615マップ（Firebase版）</title>
+    <title>615マップ（全自動データ移行版）</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 100vh; width: 100%; z-index: 1; }
-        .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); width: 240px; }
+        body { margin: 0; padding: 0; }
+        #map { height: 100vh; width: 100%; }
+        .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); width: 220px; }
         input, select { width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
-        .btn-group { display: flex; gap: 5px; }
-        button { flex: 1; padding: 8px; cursor: pointer; border: none; border-radius: 4px; background: #2196F3; color: white; }
-        .del-btn { background: #ff5252; margin-top: 5px; }
-        .edit-btn { background: #4caf50; margin-top: 5px; }
+        button { width: 100%; padding: 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; }
+        .del-btn { background: #ff5252; color: white; border: none; padding: 5px; border-radius: 3px; cursor: pointer; margin-top: 5px; width: 100%; }
+        .edit-btn { background: #4caf50; color: white; border: none; padding: 5px; border-radius: 3px; cursor: pointer; margin-top: 5px; width: 100%; }
     </style>
 </head>
 <body>
 
 <div class="ui-panel">
-    <input type="text" id="search" placeholder="名前・メモ・タグで検索" oninput="renderMarkers()">
+    <input type="text" id="search" placeholder="名前・メモで検索..." oninput="renderMarkers()">
     <select id="tag-filter" onchange="renderMarkers()">
-        <option value="">すべてのタグを表示</option>
+        <option value="">すべてのタグ</option>
     </select>
-    <button onclick="getCurrentLocation()">現在地にジャンプ</button>
-    <div style="font-size: 11px; margin-top: 8px; color: #666;">
-        ※地図をクリックすると新しいピンを立てられます。
-    </div>
+    <button onclick="map.locate({setView: true, maxZoom: 16})">現在地へ</button>
 </div>
 
 <div id="map"></div>
@@ -36,7 +32,6 @@
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
-    // --- Firebase設定 ---
     const firebaseConfig = {
         apiKey: "AIzaSyCT1QoYP3SxIOjFOrWdZWBg7akzYzcijL0",
         authDomain: "tankyuu-89580.firebaseapp.com",
@@ -48,14 +43,13 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
-    // --- 地図初期設定 ---
     const map = L.map('map').setView([35.676, 139.765], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
     const markersLayer = L.layerGroup().addTo(map);
 
     let allData = [];
 
-    // --- データ読み込み（リアルタイム） ---
+    // Firebaseのデータを監視
     db.collection("bins").onSnapshot(snap => {
         allData = [];
         const tagSet = new Set();
@@ -66,87 +60,94 @@
         });
         updateTagList(tagSet);
         renderMarkers();
+
+        // データが0件の時だけ、GitHubにあるKMLを探して取り込む
+        if (snap.empty) {
+            autoImport();
+        }
     });
 
-    // --- マーカー表示処理（検索・フィルタ対応） ---
+    // フォルダ内のKMLを自動で探して取り込む
+    async function autoImport() {
+        // 一般的なファイル名をスキャン（以前使っていた可能性がある名前）
+        const targets = ['ゴミ箱.kml', 'トイレ.kml', '給水器.kml', 'gomibako.kml', 'toilet.kml', 'kyusuiki.kml'];
+        
+        for (const file of targets) {
+            try {
+                const res = await fetch(file);
+                if (!res.ok) continue;
+                const text = await res.text();
+                const kml = new DOMParser().parseFromString(text, "text/xml");
+                const placemarks = kml.getElementsByTagName("Placemark");
+                const tag = file.split('.')[0]; // ファイル名をタグにする
+
+                for (let p of placemarks) {
+                    const coords = p.querySelector("coordinates")?.textContent.trim().split(",");
+                    if (coords) {
+                        await db.collection("bins").add({
+                            lat: parseFloat(coords[1]),
+                            lng: parseFloat(coords[0]),
+                            name: p.querySelector("name")?.textContent || "無題",
+                            memo: p.querySelector("description")?.textContent || "",
+                            tag: tag
+                        });
+                    }
+                }
+            } catch (e) { /* ファイルがない場合は無視 */ }
+        }
+    }
+
     function renderMarkers() {
         markersLayer.clearLayers();
         const searchTxt = document.getElementById('search').value.toLowerCase();
         const selectedTag = document.getElementById('tag-filter').value;
 
         allData.forEach(d => {
-            const matchSearch = d.name.toLowerCase().includes(searchTxt) || (d.memo && d.memo.toLowerCase().includes(searchTxt));
-            const matchTag = !selectedTag || d.tag === selectedTag;
+            if ((d.name.toLowerCase().includes(searchTxt) || (d.memo && d.memo.toLowerCase().includes(searchTxt))) && (!selectedTag || d.tag === selectedTag)) {
+                // タグによって色を分ける
+                let color = "#FFA000"; 
+                if (d.tag.includes("ゴミ")) color = "#FF5252";
+                if (d.tag.includes("トイレ")) color = "#448AFF";
+                if (d.tag.includes("給水")) color = "#4CAF50";
 
-            if (matchSearch && matchTag) {
-                const color = d.tag?.includes("ゴミ") ? "#FF5252" : d.tag?.includes("トイレ") ? "#448AFF" : "#4CAF50";
                 const icon = L.divIcon({
-                    html: `<div style="background:${color}; width:15px; height:15px; border:2px solid white; border-radius:50%; box-shadow:0 2px 5px rgba(0,0,0,0.3);"></div>`,
+                    html: `<div style="background:${color}; width:12px; height:12px; border:2px solid white; border-radius:50%; box-shadow:0 0 4px rgba(0,0,0,0.3);"></div>`,
                     className: ''
                 });
-
-                const popupContent = `
-                    <div style="min-width:150px;">
-                        <b>${d.name}</b><br>
-                        <small>タグ: ${d.tag}</small><br>
-                        <p style="margin:5px 0;">${d.memo || "メモなし"}</p>
-                        <button class="edit-btn" onclick="editPin('${d.id}')">編集</button>
-                        <button class="del-btn" onclick="deletePin('${d.id}')">削除</button>
-                    </div>
-                `;
-                L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popupContent);
+                const content = `<b>${d.name}</b><br><small>${d.tag}</small><p>${d.memo}</p>
+                                 <button class="edit-btn" onclick="editPin('${d.id}')">編集</button>
+                                 <button class="del-btn" onclick="deletePin('${d.id}')">削除</button>`;
+                L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(content);
             }
         });
     }
 
-    // --- ピン追加 ---
+    // 地図クリックで追加
     map.on('click', async e => {
-        const name = prompt("場所の名前を入力してください:");
-        if (!name) return;
-        const tag = prompt("タグ（例: ゴミ箱, トイレ, 給水器）:", "ゴミ箱");
-        const memo = prompt("メモ（空欄OK）:");
-        
-        await db.collection("bins").add({
-            lat: e.latlng.lat,
-            lng: e.latlng.lng,
-            name: name,
-            tag: tag || "未分類",
-            memo: memo || ""
-        });
+        const name = prompt("場所の名前:"); if (!name) return;
+        const tag = prompt("タグ（ゴミ箱/トイレ/給水器）:", "ゴミ箱");
+        const memo = prompt("メモ:");
+        await db.collection("bins").add({ lat: e.latlng.lat, lng: e.latlng.lng, name, tag, memo: memo||"" });
     });
 
-    // --- 編集・削除 ---
     window.editPin = async (id) => {
         const item = allData.find(d => d.id === id);
-        const newName = prompt("名前を編集:", item.name);
-        const newTag = prompt("タグを編集:", item.tag);
-        const newMemo = prompt("メモを編集:", item.memo);
-        if (newName) {
-            await db.collection("bins").doc(id).update({ name: newName, tag: newTag, memo: newMemo });
-        }
+        const n = prompt("名前を編集:", item.name);
+        const t = prompt("タグを編集:", item.tag);
+        const m = prompt("メモを編集:", item.memo);
+        if (n) await db.collection("bins").doc(id).update({ name: n, tag: t, memo: m });
     };
 
-    window.deletePin = async (id) => {
-        if (confirm("このピンを削除してもよろしいですか？")) {
-            await db.collection("bins").doc(id).delete();
-        }
-    };
+    window.deletePin = async (id) => { if (confirm("このピンを完全に削除しますか？")) await db.collection("bins").doc(id).delete(); };
 
-    // --- その他機能 ---
     function updateTagList(tags) {
         const filter = document.getElementById('tag-filter');
         const current = filter.value;
-        filter.innerHTML = '<option value="">すべてのタグを表示</option>';
+        filter.innerHTML = '<option value="">すべてのタグ</option>';
         tags.forEach(t => {
-            const opt = document.createElement('option');
-            opt.value = t; opt.textContent = t;
-            filter.appendChild(opt);
+            const opt = document.createElement('option'); opt.value = t; opt.textContent = t; filter.appendChild(opt);
         });
         filter.value = current;
-    }
-
-    function getCurrentLocation() {
-        map.locate({setView: true, maxZoom: 16});
     }
 </script>
 </body>
