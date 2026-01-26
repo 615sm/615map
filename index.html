@@ -1,18 +1,27 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <title>データ復旧中（615専用）</title>
+    <title>データ復旧（ファイル選択方式）</title>
     <meta charset="utf-8" />
     <style>
-        body { padding: 40px; font-family: sans-serif; text-align: center; line-height: 1.6; }
-        #status { font-size: 24px; font-weight: bold; color: #2196F3; }
-        #log { background: #f8f9fa; border: 1px solid #ddd; padding: 15px; margin-top: 20px; text-align: left; height: 150px; overflow-y: auto; }
+        body { padding: 40px; font-family: sans-serif; text-align: center; background: #f0f4f8; }
+        .box { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); display: inline-block; max-width: 500px; }
+        h2 { color: #2196F3; }
+        input[type="file"] { margin: 20px 0; padding: 10px; border: 2px dashed #2196F3; width: 100%; cursor: pointer; }
+        #status { font-weight: bold; margin-top: 20px; font-size: 18px; }
+        #log { text-align: left; font-size: 12px; color: #666; margin-top: 10px; max-height: 100px; overflow-y: auto; }
     </style>
 </head>
 <body>
-    <div id="status">🔄 復元を開始します...</div>
-    <h2 id="counter">0件 完了</h2>
-    <div id="log"></div>
+    <div class="box">
+        <h2>ピンの復旧パネル</h2>
+        <p>GitHubにある <b>615　 (2).kml</b> を選んでください。<br>それだけでFirebaseへ保存されます。</p>
+        
+        <input type="file" id="fileInput" accept=".kml">
+        
+        <div id="status">ファイルを待機中...</div>
+        <div id="log"></div>
+    </div>
 
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
@@ -28,48 +37,50 @@
         firebase.initializeApp(firebaseConfig);
         const db = firebase.firestore();
 
-        async function recover() {
-            const logEl = document.getElementById('log');
-            const targetFile = '615　 (2).kml'; // ユーザー提供の正確なファイル名
-            
-            logEl.innerHTML += `${targetFile} を読み込み中...<br>`;
-            
-            try {
-                const res = await fetch(targetFile);
-                if (!res.ok) throw new Error("ファイルが見つかりません。GitHubに同名のファイルがあるか確認してください。");
-                
-                const text = await res.text();
-                const kml = new DOMParser().parseFromString(text, "text/xml");
-                const placemarks = kml.getElementsByTagName("Placemark");
-                
-                logEl.innerHTML += `${placemarks.length}件のピンが見つかりました。Firebaseに保存中...<br>`;
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
 
-                let count = 0;
-                for (let p of placemarks) {
-                    const coords = p.querySelector("coordinates")?.textContent.trim().split(",");
-                    if (coords) {
-                        await db.collection("bins").add({
-                            lat: parseFloat(coords[1]),
-                            lng: parseFloat(coords[0]),
-                            name: p.querySelector("name")?.textContent || "ポイント",
-                            memo: p.querySelector("description")?.textContent || "",
-                            tag: "復旧データ"
-                        });
-                        count++;
-                        document.getElementById('counter').innerText = `${count}件 完了`;
+            const reader = new FileReader();
+            const status = document.getElementById('status');
+            const log = document.getElementById('log');
+
+            status.innerText = "読み込み中...";
+            
+            reader.onload = async function(event) {
+                try {
+                    const text = event.target.result;
+                    const parser = new DOMParser();
+                    const kml = parser.parseFromString(text, "text/xml");
+                    const placemarks = kml.getElementsByTagName("Placemark");
+                    
+                    status.innerText = `${placemarks.length}件を保存中...`;
+                    
+                    let count = 0;
+                    for (let p of placemarks) {
+                        const coords = p.querySelector("coordinates")?.textContent.trim().split(",");
+                        if (coords) {
+                            await db.collection("bins").add({
+                                lat: parseFloat(coords[1]),
+                                lng: parseFloat(coords[0]),
+                                name: p.querySelector("name")?.textContent || "ポイント",
+                                memo: p.querySelector("description")?.textContent || "",
+                                tag: "復旧データ"
+                            });
+                            count++;
+                            status.innerText = `保存済み: ${count} / ${placemarks.length}`;
+                        }
                     }
+                    status.innerText = "✅ 全データ復元完了！";
+                    status.style.color = "green";
+                    alert("復旧が終わりました。以前の『完全版コード』に書き換えてください。");
+                } catch (err) {
+                    status.innerText = "❌ エラーが発生しました";
+                    log.innerText = err.message;
                 }
-                
-                document.getElementById('status').innerText = "✅ 復元成功！";
-                document.getElementById('status').style.color = "green";
-                logEl.innerHTML += "<b>すべてのデータを保存しました。もうこのコードを「完全版」に書き換えて大丈夫です！</b>";
-                
-            } catch (e) {
-                document.getElementById('status').innerText = "❌ 失敗";
-                logEl.innerHTML += `エラー: ${e.message}<br>`;
-            }
-        }
-        recover();
+            };
+            reader.readAsText(file);
+        });
     </script>
 </body>
 </html>
