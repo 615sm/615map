@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <title>615マップ</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        body { margin: 0; padding: 0; }
+        #map { height: 100vh; width: 100%; position: absolute; z-index: 1; }
+        .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 10px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); width: 220px; font-family: sans-serif; }
+        input, select, button { width: 100%; margin-bottom: 5px; padding: 8px; box-sizing: border-box; border: 1px solid #ccc; border-radius: 4px; }
+        button { background: #2196F3; color: white; border: none; font-weight: bold; cursor: pointer; }
+        .dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+    </style>
+</head>
+<body>
+    <div class="ui-panel">
+        <input type="text" id="address" placeholder="店名・住所を検索">
+        <button onclick="searchAddr()">検索</button>
+        <hr>
+        <select id="tag-filter" onchange="renderPins()">
+            <option value="すべて">すべて表示</option>
+            <option value="ゴミ箱">ゴミ箱のみ</option>
+            <option value="トイレ">トイレのみ</option>
+            <option value="給水器">給水器のみ</option>
+        </select>
+        <button onclick="locateUser()" style="background:#4CAF50;">📍 現在地を表示</button>
+        <div style="font-size:12px; margin-top:5px;">
+            <span class="dot" style="background:#FF5252;"></span>ゴミ箱 
+            <span class="dot" style="background:#448AFF;"></span>トイレ 
+            <span class="dot" style="background:#4CAF50;"></span>給水
+        </div>
+    </div>
+    <div id="map"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCT1QoYP3SxIOjFOrWdZWBg7akzYzcijL0",
+            authDomain: "tankyuu-89580.firebaseapp.com",
+            projectId: "tankyuu-89580",
+            storageBucket: "tankyuu-89580.firebasestorage.app",
+            messagingSenderId: "88004060927",
+            appId: "1:88004060927:web:0cbb798daf727883a38eca"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
+
+        const map = L.map('map').setView([35.676, 139.765], 15);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+        const layerGroup = L.layerGroup().addTo(map);
+        let pins = [];
+
+        db.collection("bins").onSnapshot(snap => {
+            pins = snap.docs.map(doc => ({id: doc.id, ...doc.data()}));
+            renderPins();
+        });
+
+        function renderPins() {
+            layerGroup.clearLayers();
+            const filter = document.getElementById('tag-filter').value;
+            pins.forEach(d => {
+                if (filter !== "すべて" && !d.tag.includes(filter)) return;
+                const color = d.tag.includes("ゴミ") ? "#FF5252" : d.tag.includes("トイレ") ? "#448AFF" : "#4CAF50";
+                const icon = L.divIcon({ html: `<div style="background:${color};width:12px;height:12px;border-radius:50%;border:2px solid white;"></div>`, className: '' });
+                L.marker([d.lat, d.lng], {icon}).addTo(layerGroup).bindPopup(`<b>${d.name}</b><br>${d.memo}`);
+            });
+        }
+
+        // --- 改良版：施設名検索 ---
+        window.searchAddr = () => {
+            const q = document.getElementById('address').value;
+            if (!q) return;
+            // Nominatimという無料検索エンジンを使用。日本語や施設名に対応。
+            fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(q)}&accept-language=ja`)
+            .then(r => r.json())
+            .then(d => {
+                if (d && d.length > 0) {
+                    // 最も確度の高い検索結果にジャンプ
+                    map.setView([d[0].lat, d[0].lon], 17);
+                    // 検索した場所に赤い一時的なマーカーを立てる
+                    L.popup()
+                        .setLatLng([d[0].lat, d[0].lon])
+                        .setContent(`検索結果: ${q}`)
+                        .openOn(map);
+                } else {
+                    alert("見つかりませんでした。別の言葉で試してみてください。");
+                }
+            })
+            .catch(e => alert("検索エラーが発生しました。"));
+        };
+
+        // --- 現在地表示 ---
+        window.locateUser = () => {
+            map.locate({setView: true, maxZoom: 16});
+        };
+        map.on('locationfound', e => {
+            L.circleMarker(e.latlng, {radius: 8, color: '#2196F3', fillColor: '#2196F3', fillOpacity: 0.8}).addTo(map).bindPopup("現在地").openPopup();
+        });
+        map.on('locationerror', () => alert("位置情報を取得できませんでした。"));
+
+        // 新規追加
+        map.on('click', async e => {
+            const name = prompt("地点名を入力"); if(!name) return;
+            const tag = prompt("タグ(ゴミ箱/トイレ/給水器)", "給水器");
+            await db.collection("bins").add({ lat: e.latlng.lat, lng: e.latlng.lng, name, tag, memo: "" });
+        });
+    </script>
+</body>
+</html>
