@@ -1,86 +1,102 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <title>データ復旧（ファイル選択方式）</title>
+    <title>615マップ（完成版）</title>
     <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { padding: 40px; font-family: sans-serif; text-align: center; background: #f0f4f8; }
-        .box { background: white; padding: 30px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); display: inline-block; max-width: 500px; }
-        h2 { color: #2196F3; }
-        input[type="file"] { margin: 20px 0; padding: 10px; border: 2px dashed #2196F3; width: 100%; cursor: pointer; }
-        #status { font-weight: bold; margin-top: 20px; font-size: 18px; }
-        #log { text-align: left; font-size: 12px; color: #666; margin-top: 10px; max-height: 100px; overflow-y: auto; }
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
+        .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); width: 220px; }
+        input, select { width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        button { width: 100%; padding: 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+        .del-btn { background: #FF5252; color: white; border: none; padding: 6px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; }
+        .edit-btn { background: #4CAF50; color: white; border: none; padding: 6px; border-radius: 4px; cursor: pointer; width: 100%; margin-top: 5px; }
     </style>
 </head>
 <body>
-    <div class="box">
-        <h2>ピンの復旧パネル</h2>
-        <p>GitHubにある <b>615　 (2).kml</b> を選んでください。<br>それだけでFirebaseへ保存されます。</p>
-        
-        <input type="file" id="fileInput" accept=".kml">
-        
-        <div id="status">ファイルを待機中...</div>
-        <div id="log"></div>
-    </div>
 
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-    <script>
-        const firebaseConfig = {
-            apiKey: "AIzaSyCT1QoYP3SxIOjFOrWdZWBg7akzYzcijL0",
-            authDomain: "tankyuu-89580.firebaseapp.com",
-            projectId: "tankyuu-89580",
-            storageBucket: "tankyuu-89580.firebasestorage.app",
-            messagingSenderId: "88004060927",
-            appId: "1:88004060927:web:0cbb798daf727883a38eca"
-        };
-        firebase.initializeApp(firebaseConfig);
-        const db = firebase.firestore();
+<div class="ui-panel">
+    <input type="text" id="search" placeholder="名前やメモを検索..." oninput="renderMarkers()">
+    <select id="tag-filter" onchange="renderMarkers()">
+        <option value="">すべてのタグ</option>
+    </select>
+    <button onclick="map.locate({setView: true, maxZoom: 16})">現在地を表示</button>
+</div>
 
-        document.getElementById('fileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if (!file) return;
+<div id="map"></div>
 
-            const reader = new FileReader();
-            const status = document.getElementById('status');
-            const log = document.getElementById('log');
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
-            status.innerText = "読み込み中...";
-            
-            reader.onload = async function(event) {
-                try {
-                    const text = event.target.result;
-                    const parser = new DOMParser();
-                    const kml = parser.parseFromString(text, "text/xml");
-                    const placemarks = kml.getElementsByTagName("Placemark");
-                    
-                    status.innerText = `${placemarks.length}件を保存中...`;
-                    
-                    let count = 0;
-                    for (let p of placemarks) {
-                        const coords = p.querySelector("coordinates")?.textContent.trim().split(",");
-                        if (coords) {
-                            await db.collection("bins").add({
-                                lat: parseFloat(coords[1]),
-                                lng: parseFloat(coords[0]),
-                                name: p.querySelector("name")?.textContent || "ポイント",
-                                memo: p.querySelector("description")?.textContent || "",
-                                tag: "復旧データ"
-                            });
-                            count++;
-                            status.innerText = `保存済み: ${count} / ${placemarks.length}`;
-                        }
-                    }
-                    status.innerText = "✅ 全データ復元完了！";
-                    status.style.color = "green";
-                    alert("復旧が終わりました。以前の『完全版コード』に書き換えてください。");
-                } catch (err) {
-                    status.innerText = "❌ エラーが発生しました";
-                    log.innerText = err.message;
-                }
-            };
-            reader.readAsText(file);
+<script>
+    // Firebase設定
+    const firebaseConfig = {
+        apiKey: "AIzaSyCT1QoYP3SxIOjFOrWdZWBg7akzYzcijL0",
+        authDomain: "tankyuu-89580.firebaseapp.com",
+        projectId: "tankyuu-89580",
+        storageBucket: "tankyuu-89580.firebasestorage.app",
+        messagingSenderId: "88004060927",
+        appId: "1:88004060927:web:0cbb798daf727883a38eca"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    const map = L.map('map').setView([35.676, 139.765], 15);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    const markersLayer = L.layerGroup().addTo(map);
+
+    let allData = [];
+
+    // Firebaseからリアルタイムにピンを読み込む
+    db.collection("bins").onSnapshot(snap => {
+        allData = [];
+        const tagSet = new Set();
+        snap.forEach(doc => {
+            const d = doc.data();
+            allData.push({ id: doc.id, ...d });
+            if (d.tag) tagSet.add(d.tag);
         });
-    </script>
-</body>
-</html>
+        updateTagList(tagSet);
+        renderMarkers();
+    });
+
+    function renderMarkers() {
+        markersLayer.clearLayers();
+        const searchTxt = document.getElementById('search').value.toLowerCase();
+        const selectedTag = document.getElementById('tag-filter').value;
+
+        allData.forEach(d => {
+            const matchSearch = d.name.toLowerCase().includes(searchTxt) || (d.memo && d.memo.toLowerCase().includes(searchTxt));
+            const matchTag = !selectedTag || d.tag === selectedTag;
+
+            if (matchSearch && matchTag) {
+                // 色分け（復旧データはオレンジ、その他はタグに合わせて色分け）
+                let color = "#FFA000"; 
+                if (d.tag?.includes("ゴミ")) color = "#FF5252";
+                if (d.tag?.includes("トイレ")) color = "#448AFF";
+                
+                const icon = L.divIcon({
+                    html: `<div style="background:${color}; width:14px; height:14px; border:2px solid white; border-radius:50%; box-shadow:0 0 5px rgba(0,0,0,0.3);"></div>`,
+                    className: ''
+                });
+
+                const popupContent = `
+                    <div style="min-width:150px">
+                        <b>${d.name}</b><br>
+                        <small>タグ: ${d.tag}</small>
+                        <p style="margin:5px 0">${d.memo || 'メモなし'}</p>
+                        <button class="edit-btn" onclick="editPin('${d.id}')">編集</button>
+                        <button class="del-btn" onclick="deletePin('${d.id}')">削除</button>
+                    </div>
+                `;
+                L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popupContent);
+            }
+        });
+    }
+
+    // 地図をクリックして新しいピンを追加
+    map.on('click', async e => {
+        const name = prompt("場所の名前を入力
