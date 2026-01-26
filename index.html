@@ -1,88 +1,75 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <title>615マップ（データ復旧中...）</title>
+    <title>データ復元中...</title>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; padding: 0; }
-        #map { height: 100vh; width: 100%; }
-        .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); }
-        .status { color: #f44336; font-weight: bold; }
+        body { margin: 0; padding: 20px; font-family: sans-serif; text-align: center; }
+        #status { font-size: 24px; font-weight: bold; margin-bottom: 10px; }
+        #log { background: #eee; padding: 10px; border-radius: 5px; text-align: left; height: 200px; overflow-y: auto; }
     </style>
 </head>
 <body>
+    <div id="status">🔄 データ復元を開始します...</div>
+    <p id="counter">0件 移行済み</p>
+    <div id="log"></div>
 
-<div class="ui-panel">
-    <h3>データ復旧・移行パネル</h3>
-    <div id="status" class="status">準備中...</div>
-    <p id="counter">読み込みをお待ちください</p>
-</div>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script>
+        const firebaseConfig = {
+            apiKey: "AIzaSyCT1QoYP3SxIOjFOrWdZWBg7akzYzcijL0",
+            authDomain: "tankyuu-89580.firebaseapp.com",
+            projectId: "tankyuu-89580",
+            storageBucket: "tankyuu-89580.firebasestorage.app",
+            messagingSenderId: "88004060927",
+            appId: "1:88004060927:web:0cbb798daf727883a38eca"
+        };
+        firebase.initializeApp(firebaseConfig);
+        const db = firebase.firestore();
 
-<div id="map"></div>
+        const log = (msg) => { document.getElementById('log').innerHTML += msg + "<br>"; };
 
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+        async function recover() {
+            // スキャンするファイル名リスト（考えられるものを全て入れました）
+            const files = ['ゴミ箱.kml', 'トイレ.kml', '給水器.kml', 'gomibako.kml', 'toilet.kml', 'water.kml'];
+            let total = 0;
 
-<script>
-    const firebaseConfig = {
-        apiKey: "AIzaSyCT1QoYP3SxIOjFOrWdZWBg7akzYzcijL0",
-        authDomain: "tankyuu-89580.firebaseapp.com",
-        projectId: "tankyuu-89580",
-        storageBucket: "tankyuu-89580.firebasestorage.app",
-        messagingSenderId: "88004060927",
-        appId: "1:88004060927:web:0cbb798daf727883a38eca"
-    };
-    firebase.initializeApp(firebaseConfig);
-    const db = firebase.firestore();
+            for (const file of files) {
+                log(`ファイル ${file} を確認中...`);
+                try {
+                    const res = await fetch(file);
+                    if (!res.ok) { log(`→ ${file} は見つかりませんでした。`); continue; }
+                    
+                    const text = await res.text();
+                    const kml = new DOMParser().parseFromString(text, "text/xml");
+                    const placemarks = kml.getElementsByTagName("Placemark");
+                    const tag = file.split('.')[0];
 
-    const map = L.map('map').setView([35.676, 139.765], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+                    log(`→ ${file} から ${placemarks.length} 件見つかりました。保存中...`);
 
-    async function startImport() {
-        const statusEl = document.getElementById('status');
-        const counterEl = document.getElementById('counter');
-        
-        // GitHubにあるKMLファイルを自動スキャン（名前が違う場合はここを修正してください）
-        const files = ['ゴミ箱.kml', 'トイレ.kml', '給水器.kml', 'gomibako.kml', 'toilet.kml', 'kyusuiki.kml'];
-        let total = 0;
-
-        statusEl.innerText = "KMLをスキャンしてFirebaseに書き込んでいます...";
-
-        for (const file of files) {
-            try {
-                const res = await fetch(file);
-                if (!res.ok) continue;
-                const text = await res.text();
-                const kml = new DOMParser().parseFromString(text, "text/xml");
-                const placemarks = kml.getElementsByTagName("Placemark");
-                const tag = file.split('.')[0]; 
-
-                for (let p of placemarks) {
-                    const coords = p.querySelector("coordinates")?.textContent.trim().split(",");
-                    if (coords) {
-                        await db.collection("bins").add({
-                            lat: parseFloat(coords[1]),
-                            lng: parseFloat(coords[0]),
-                            name: p.querySelector("name")?.textContent || "無題",
-                            memo: p.querySelector("description")?.textContent || "",
-                            tag: tag
-                        });
-                        total++;
-                        counterEl.innerText = `${total}件 移行完了...`;
+                    for (let p of placemarks) {
+                        const coords = p.querySelector("coordinates")?.textContent.trim().split(",");
+                        if (coords) {
+                            await db.collection("bins").add({
+                                lat: parseFloat(coords[1]),
+                                lng: parseFloat(coords[0]),
+                                name: p.querySelector("name")?.textContent || "無題",
+                                memo: p.querySelector("description")?.textContent || "",
+                                tag: tag
+                            });
+                            total++;
+                            document.getElementById('counter').innerText = `${total}件 移行完了`;
+                        }
                     }
-                }
-            } catch (e) { console.error(e); }
+                } catch (e) { log(`❌ エラー: ${e.message}`); }
+            }
+            document.getElementById('status').innerText = "✅ 復元完了！";
+            document.getElementById('status').style.color = "green";
+            log("<b>すべてのデータをFirebaseに保存しました。以前の『完全版コード』に戻してください。</b>");
         }
-
-        statusEl.style.color = "green";
-        statusEl.innerText = "復旧完了！";
-        alert(`${total}件のデータをFirebaseに保存しました。もうこのコードは不要です。`);
-    }
-
-    startImport();
-</script>
+        recover();
+    </script>
 </body>
 </html>
