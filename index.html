@@ -1,13 +1,13 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <title>615マップ（完成版）</title>
+    <title>615マップ（復旧版）</title>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 100vh; width: 100%; z-index: 1; }
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; }
+        #map { height: 100vh; width: 100vw; position: absolute; top: 0; left: 0; z-index: 1; }
         .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); width: 220px; }
         input, select { width: 100%; padding: 8px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
         button { width: 100%; padding: 8px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
@@ -18,18 +18,16 @@
 <body>
 
 <div class="ui-panel">
-    <input type="text" id="search" placeholder="名前やメモを検索..." oninput="renderMarkers()">
-    <select id="tag-filter" onchange="renderMarkers()">
-        <option value="">すべてのタグ</option>
-    </select>
+    <input type="text" id="search" placeholder="名前・メモを検索..." oninput="renderMarkers()">
+    <select id="tag-filter" onchange="renderMarkers()"><option value="">すべてのタグ</option></select>
     <button onclick="map.locate({setView: true, maxZoom: 16})">現在地を表示</button>
 </div>
 
 <div id="map"></div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
 <script>
     // Firebase設定
@@ -44,13 +42,16 @@
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
 
+    // 地図の初期化を確実に行う
     const map = L.map('map').setView([35.676, 139.765], 15);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
-    const markersLayer = L.layerGroup().addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
 
+    const markersLayer = L.layerGroup().addTo(map);
     let allData = [];
 
-    // Firebaseからリアルタイムにピンを読み込む
+    // Firebaseデータのリアルタイム取得
     db.collection("bins").onSnapshot(snap => {
         allData = [];
         const tagSet = new Set();
@@ -61,6 +62,9 @@
         });
         updateTagList(tagSet);
         renderMarkers();
+    }, err => {
+        console.error("Firebase Error:", err);
+        alert("データの読み込みに失敗しました。Firebaseのルールを確認してください。");
     });
 
     function renderMarkers() {
@@ -73,7 +77,6 @@
             const matchTag = !selectedTag || d.tag === selectedTag;
 
             if (matchSearch && matchTag) {
-                // 色分け（復旧データはオレンジ、その他はタグに合わせて色分け）
                 let color = "#FFA000"; 
                 if (d.tag?.includes("ゴミ")) color = "#FF5252";
                 if (d.tag?.includes("トイレ")) color = "#448AFF";
@@ -85,8 +88,7 @@
 
                 const popupContent = `
                     <div style="min-width:150px">
-                        <b>${d.name}</b><br>
-                        <small>タグ: ${d.tag}</small>
+                        <b>${d.name}</b><br><small>タグ: ${d.tag}</small>
                         <p style="margin:5px 0">${d.memo || 'メモなし'}</p>
                         <button class="edit-btn" onclick="editPin('${d.id}')">編集</button>
                         <button class="del-btn" onclick="deletePin('${d.id}')">削除</button>
@@ -97,6 +99,41 @@
         });
     }
 
-    // 地図をクリックして新しいピンを追加
     map.on('click', async e => {
-        const name = prompt("場所の名前を入力
+        const name = prompt("場所の名前を入力:"); if (!name) return;
+        const tag = prompt("タグ（ゴミ箱/トイレ など）:", "ゴミ箱");
+        const memo = prompt("メモ（任意）:");
+        await db.collection("bins").add({
+            lat: e.latlng.lat, lng: e.latlng.lng,
+            name: name, tag: tag || "未分類", memo: memo || ""
+        });
+    });
+
+    window.editPin = async (id) => {
+        const item = allData.find(d => d.id === id);
+        const n = prompt("名前を編集:", item.name);
+        const t = prompt("タグを編集:", item.tag);
+        const m = prompt("メモを編集:", item.memo);
+        if (n) await db.collection("bins").doc(id).update({ name: n, tag: t, memo: m });
+    };
+
+    window.deletePin = async (id) => {
+        if (confirm("このピンを完全に削除しますか？")) {
+            await db.collection("bins").doc(id).delete();
+        }
+    };
+
+    function updateTagList(tags) {
+        const filter = document.getElementById('tag-filter');
+        const current = filter.value;
+        filter.innerHTML = '<option value="">すべてのタグ</option>';
+        tags.forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t; opt.textContent = t;
+            filter.appendChild(opt);
+        });
+        filter.value = current;
+    }
+</script>
+</body>
+</html>
