@@ -134,6 +134,44 @@
         });
         filter.value = current;
     }
+
+// --- 一括インポート用関数（データを入れたら消してOK） ---
+async function importKML() {
+    const kmlText = `ここにKMLの中身を全部貼り付けます`; 
+    // ※ 実際にはこの下の実行コードを使って、あなたのKMLを解析して流し込みます。
+    
+    const parser = new DOMParser();
+    const kml = parser.parseFromString(kmlText, "text/xml");
+    const folders = kml.querySelectorAll("Folder");
+
+    for (const folder of folders) {
+        const tagName = folder.querySelector("name").textContent; // 「トイレ」など
+        const placemarks = folder.querySelectorAll("Placemark");
+
+        for (const p of placemarks) {
+            const name = p.querySelector("name")?.textContent || "名称未設定";
+            const coords = p.querySelector("coordinates").textContent.trim().split(",");
+            const lng = parseFloat(coords[0]);
+            const lat = parseFloat(coords[1]);
+            const memo = p.querySelector("description")?.textContent || "";
+
+            // Firestoreに保存
+            await db.collection("bins").add({
+                name: name,
+                tag: tagName,
+                lat: lat,
+                lng: lng,
+                memo: memo,
+                createdAt: new Date()
+            });
+        }
+    }
+    alert("インポートが完了しました！ページをリロードしてください。");
+}
+
+// 実行ボタンを画面に出す（コンソールから実行してもOK）
+// importKML();
+    
 </script>
 </body>
 </html>
