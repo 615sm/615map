@@ -98,29 +98,68 @@
         });
     }
 
-    function renderMarkers() {
-        markersLayer.clearLayers();
-        const selectedTag = document.getElementById('tag-filter').value;
+function renderMarkers() {
+    markersLayer.clearLayers();
+    const selectedTag = document.getElementById('tag-filter').value;
 
-        allData.forEach(d => {
-            if (selectedTag && d.tag !== selectedTag) return;
-            if (d.tag === "テスト") return;
+    allData.forEach(d => {
+        if (selectedTag && d.tag !== selectedTag) return;
+        if (d.tag === "テスト") return;
 
-            let color = "#9E9E9E";
-            if (d.tag === "ゴミ箱") color = "#FF5252";
-            if (d.tag === "トイレ") color = "#448AFF";
-            if (d.tag === "給水所") color = "#00BCD4";
+        let color = "#9E9E9E";
+        if (d.tag === "ゴミ箱") color = "#FF5252";
+        if (d.tag === "トイレ") color = "#448AFF";
+        if (d.tag === "給水所") color = "#00BCD4";
 
-            const icon = L.divIcon({
-                html: `<div style="background:${color}; width:16px; height:16px; border:2px solid white; border-radius:50%;"></div>`,
-                className: ''
-            });
-
-            const popup = `<div><b>${d.name}</b><br>タグ: ${d.tag}<br>${d.memo}<br>
-                <button class="del-btn" onclick="deletePin('${d.id}')" style="padding:2px; font-size:10px;">削除</button></div>`;
-            L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popup);
+        const icon = L.divIcon({
+            html: `<div style="background:${color}; width:16px; height:16px; border:2px solid white; border-radius:50%; box-shadow:0 0 5px rgba(0,0,0,0.3);"></div>`,
+            className: ''
         });
+
+        // ポップアップの中に「編集ボタン」を追加
+        const popup = `
+            <div style="min-width:150px">
+                <b style="font-size:14px;">${d.name}</b><br>
+                <small>タグ: ${d.tag}</small>
+                <p style="margin:8px 0; font-size:12px; color:#555;">${d.memo || 'メモなし'}</p>
+                <hr style="border:0; border-top:1px solid #eee; margin:5px 0;">
+                <button class="edit-btn" onclick="editPin('${d.id}')" style="background:#4CAF50; color:white; border:none; padding:8px; width:100%; border-radius:4px; margin-bottom:5px; cursor:pointer; font-weight:bold;">✏️ 編集する</button>
+                <button class="del-btn" onclick="deletePin('${d.id}')" style="background:#FF5252; color:white; border:none; padding:8px; width:100%; border-radius:4px; cursor:pointer; font-weight:bold;">🗑️ 削除する</button>
+            </div>
+        `;
+        L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popup);
+    });
+}
+
+// 編集ボタンを押した時の処理
+window.editPin = async (id) => {
+    const item = allData.find(d => d.id === id);
+    if (!item) return;
+
+    // 現在の値を初期値として入力ダイアログを出す
+    const newName = prompt("名前を編集してください:", item.name);
+    if (newName === null) return; // キャンセルなら終了
+
+    const newMemo = prompt("メモを編集してください:", item.memo);
+    if (newMemo === null) return;
+
+    // どのタグにするか（今のタグを初期値にする）
+    const newTag = prompt(`タグを編集 (${currentTags.join(', ')}):`, item.tag);
+    if (newTag === null) return;
+
+    try {
+        // Firebaseのデータを書き換え
+        await db.collection("bins").doc(id).update({
+            name: newName,
+            memo: newMemo,
+            tag: newTag
+        });
+        alert("ピンの情報を更新しました！");
+    } catch (error) {
+        console.error("Error updating document: ", error);
+        alert("更新に失敗しました。");
     }
+};
 
     function updateTagDropdown() {
         const filter = document.getElementById('tag-filter');
