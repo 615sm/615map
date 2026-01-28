@@ -1,21 +1,22 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <title>615マップ（多機能版）</title>
+    <title>615マップ</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <link rel="stylesheet" href="https://unpkg.com/leaflet-control-geocoder/dist/Control.Geocoder.css" />
     <style>
-        body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; }
-        #map { height: 100vh; width: 100vw; position: absolute; top: 0; left: 0; z-index: 1; }
+        body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; overflow: hidden; }
+        #map { height: 100vh; width: 100vw; position: absolute; top: 0; left: 0; z-index: 1; background: #eee; }
         .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); width: 250px; }
-        input, select { width: 100%; padding: 10px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        input, select { width: 100%; padding: 10px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
         button { width: 100%; padding: 10px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 5px; }
+        button:active { opacity: 0.8; }
         .tag-admin { margin-top: 10px; padding-top: 10px; border-top: 1px solid #eee; }
         .tag-admin button { background: #607D8B; font-size: 11px; padding: 5px; }
-        .del-btn { background: #FF5252 !important; color: white; }
-        .edit-btn { background: #4CAF50 !important; color: white; }
+        .del-btn { background: #FF5252 !important; }
+        .edit-btn { background: #4CAF50 !important; }
     </style>
 </head>
 <body>
@@ -23,16 +24,12 @@
 <div class="ui-panel">
     <input type="text" id="address-input" placeholder="住所・駅名を入力...">
     <button onclick="searchAddress()" style="background: #FF9800;">場所を検索する</button>
-    
     <hr>
-    
     <label style="font-size: 11px; color: #666;">タグで絞り込む：</label>
     <select id="tag-filter" onchange="renderMarkers()">
         <option value="">すべてのタグ</option>
     </select>
-    
     <button onclick="map.locate({setView: true, maxZoom: 16})">現在地を表示</button>
-
     <div class="tag-admin">
         <button onclick="addNewTag()">＋ 新しいタグを追加</button>
         <button onclick="deleteCurrentTag()" class="del-btn">⚡ 選択中のタグを削除</button>
@@ -47,7 +44,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
 <script>
-    // Firebase設定
+    // --- Firebase 設定 ---
     const firebaseConfig = {
         apiKey: "AIzaSyCT1QoYP3SxIOjFOrWdZWBg7akzYzcijL0",
         authDomain: "tankyuu-89580.firebaseapp.com",
@@ -58,11 +55,8 @@
     };
     firebase.initializeApp(firebaseConfig);
     const db = firebase.firestore();
-    
-    // 住所検索エンジンの初期化
-    const geocoder = L.Control.Geocoder.nominatim();
 
-    // 地図の初期化
+    // --- 地図の初期化 ---
     const map = L.map('map').setView([35.681, 139.767], 13);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '&copy; OpenStreetMap'
@@ -72,7 +66,24 @@
     let allData = [];
     let currentTags = ["ゴミ箱", "給水所", "トイレ"];
 
-    // タグリストの取得
+    // --- 住所検索機能 ---
+    function searchAddress() {
+        const addr = document.getElementById('address-input').value;
+        if (!addr) return alert("住所や駅名を入力してください");
+        
+        // Nominatim (OSMの検索エンジン) を使用
+        const geocoder = L.Control.Geocoder.nominatim();
+        geocoder.geocode(addr, function(results) {
+            if (results && results.length > 0) {
+                const r = results[0];
+                map.flyTo(r.center, 16);
+            } else {
+                alert("場所が見つかりませんでした。");
+            }
+        });
+    }
+
+    // --- データ取得 (タグ) ---
     db.collection("settings").doc("tags").onSnapshot(doc => {
         if (doc.exists) {
             currentTags = doc.data().list;
@@ -82,27 +93,13 @@
         }
     });
 
-    // ピンデータの取得
+    // --- データ取得 (ピン) ---
     db.collection("bins").onSnapshot(snap => {
         allData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
         renderMarkers();
     });
 
-    // 住所検索機能
-    function searchAddress() {
-        const addr = document.getElementById('address-input').value;
-        if (!addr) return alert("住所や駅名を入力してください");
-        
-        geocoder.geocode(addr, function(results) {
-            if (results && results.length > 0) {
-                const r = results[0];
-                map.flyTo(r.center, 16); // スムーズにジャンプ
-            } else {
-                alert("場所が見つかりませんでした。");
-            }
-        });
-    }
-
+    // --- ピンの描画 ---
     function renderMarkers() {
         markersLayer.clearLayers();
         const selectedTag = document.getElementById('tag-filter').value;
@@ -110,6 +107,7 @@
         allData.forEach(d => {
             if (selectedTag && d.tag !== selectedTag) return;
             if (d.tag === "テスト") return;
+            if (!d.lat || !d.lng) return;
 
             let color = "#9E9E9E";
             if (d.tag === "ゴミ箱") color = "#FF5252";
@@ -121,20 +119,21 @@
                 className: ''
             });
 
-            const popup = `
+            const popupContent = `
                 <div style="min-width:160px">
-                    <b style="font-size:14px;">${d.name}</b><br>
-                    <small>タグ: ${d.tag}</small>
+                    <b style="font-size:14px;">${d.name || '名称未設定'}</b><br>
+                    <small>タグ: ${d.tag || 'なし'}</small>
                     <p style="margin:8px 0; font-size:12px;">${d.memo || 'メモなし'}</p>
                     <hr style="border:0; border-top:1px solid #eee; margin:5px 0;">
-                    <button class="edit-btn" onclick="editPin('${d.id}')" style="width:100%; border:none; padding:8px; border-radius:4px; font-weight:bold; cursor:pointer; margin-bottom:5px;">✏️ 編集する</button>
-                    <button class="del-btn" onclick="deletePin('${d.id}')" style="width:100%; border:none; padding:8px; border-radius:4px; font-weight:bold; cursor:pointer;">🗑️ 削除する</button>
+                    <button class="edit-btn" onclick="editPin('${d.id}')" style="width:100%; border:none; padding:8px; border-radius:4px; font-weight:bold; cursor:pointer; margin-bottom:5px; color:white;">✏️ 編集する</button>
+                    <button class="del-btn" onclick="deletePin('${d.id}')" style="width:100%; border:none; padding:8px; border-radius:4px; font-weight:bold; cursor:pointer; color:white;">🗑️ 削除する</button>
                 </div>
             `;
-            L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popup);
+            L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popupContent);
         });
     }
 
+    // --- ピン編集 ---
     window.editPin = async (id) => {
         const item = allData.find(d => d.id === id);
         if (!item) return;
@@ -152,6 +151,7 @@
         });
     };
 
+    // --- タグ管理 ---
     function updateTagDropdown() {
         const filter = document.getElementById('tag-filter');
         const prevValue = filter.value;
@@ -165,7 +165,7 @@
     }
 
     async function addNewTag() {
-        const newTag = prompt("追加するタグ名:");
+        const newTag = prompt("追加する新しいタグ名:");
         if (newTag && !currentTags.includes(newTag)) {
             currentTags.push(newTag);
             await db.collection("settings").doc("tags").update({ list: currentTags });
@@ -174,16 +174,17 @@
 
     async function deleteCurrentTag() {
         const target = document.getElementById('tag-filter').value;
-        if (!target) return alert("削除したいタグを選択してください");
+        if (!target) return alert("削除したいタグを一覧から選んでください");
         if (confirm(`タグ「${target}」を削除しますか？`)) {
             const newList = currentTags.filter(t => t !== target);
             await db.collection("settings").doc("tags").update({ list: newList });
         }
     }
 
+    // --- 新規追加 ---
     map.on('click', async e => {
         const name = prompt("場所の名前:"); if (!name) return;
-        const tag = prompt(`タグを選択 (${currentTags.join(', ')}):`, "ゴミ箱");
+        const tag = prompt(`タグを入力 (${currentTags.join(', ')}):`, "ゴミ箱");
         const memo = prompt("メモ:");
         await db.collection("bins").add({
             lat: e.latlng.lat, lng: e.latlng.lng,
@@ -193,8 +194,4 @@
     });
 
     window.deletePin = async (id) => {
-        if (confirm("削除しますか？")) await db.collection("bins").doc(id).delete();
-    };
-</script>
-</body>
-</html>
+        if (confirm("削除します
