@@ -7,7 +7,7 @@
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
         body, html { margin: 0; padding: 0; height: 100%; width: 100%; font-family: sans-serif; overflow: hidden; }
-        #map { height: 100vh; width: 100vw; position: absolute; top: 0; left: 0; z-index: 1; background: #f0f0f0; }
+        #map { height: 100vh; width: 100vw; position: absolute; top: 0; left: 0; z-index: 1; background: #e0e0e0; }
         .ui-panel { position: absolute; top: 10px; left: 10px; z-index: 1000; background: white; padding: 12px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.2); width: 250px; }
         input, select { width: 100%; padding: 10px; margin-bottom: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-size: 14px; }
         button { width: 100%; padding: 10px; background: #2196F3; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; margin-bottom: 5px; }
@@ -23,7 +23,7 @@
     <button onclick="searchAddress()" style="background: #FF9800;">場所を検索する</button>
     <hr>
     <label style="font-size: 11px; color: #666;">タグで絞り込む：</label>
-    <select id="tag-filter" onchange="renderMarkers()">
+    <select id="tag-filter">
         <option value="">すべてのタグ</option>
     </select>
     <button onclick="map.locate({setView: true, maxZoom: 16})">現在地を表示</button>
@@ -36,12 +36,128 @@
 <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
 <script>
-    // 1. 地図の初期化を最優先
+    // 1. 地図の初期化（最優先）
     const map = L.map('map').setView([35.681, 139.767], 13);
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
     const markersLayer = L.layerGroup().addTo(map);
 
     // 2. Firebase設定
     const firebaseConfig = {
         apiKey: "AIzaSyCT1QoYP3SxIOjFOrWdZWBg7akzYzcijL0",
-        authDomain: "tankyuu-
+        authDomain: "tankyuu-89580.firebaseapp.com",
+        projectId: "tankyuu-89580",
+        storageBucket: "tankyuu-89580.firebasestorage.app",
+        messagingSenderId: "88004060927",
+        appId: "1:88004060927:web:0cbb798daf727883a38eca"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+
+    let allData = [];
+
+    // --- 絞り込みタグの更新関数 ---
+    function updateAutoTagDropdown() {
+        const filter = document.getElementById('tag-filter');
+        const currentSelection = filter.value;
+        const defaultTags = ["ゴミ箱", "給水器", "トイレ"];
+        const foundTags = allData.map(d => d.tag).filter(t => t && t !== "テスト");
+        const usedTags = [...new Set([...defaultTags, ...foundTags])];
+        
+        filter.innerHTML = '<option value="">すべてのタグ</option>';
+        usedTags.sort().forEach(t => {
+            const opt = document.createElement('option');
+            opt.value = t; opt.innerText = t;
+            filter.appendChild(opt);
+        });
+        filter.value = usedTags.includes(currentSelection) ? currentSelection : "";
+    }
+
+    // --- ピン描画関数 ---
+    function renderMarkers() {
+        markersLayer.clearLayers();
+        const filterValue = document.getElementById('tag-filter').value;
+        
+        allData.forEach(d => {
+            if (!d.lat || !d.lng) return; // 座標がないものはスキップ
+
+            // 絞り込み判定
+            if (filterValue) {
+                const tagStr = String(d.tag || "");
+                const isMatch = tagStr.includes(filterValue);
+                const isWaterMatch = (filterValue.includes("給水") && tagStr.includes("給水"));
+                if (!isMatch && !isWaterMatch) return;
+            }
+
+            let color = "#9E9E9E";
+            const tagStr = String(d.tag || "");
+            if (tagStr.includes("ゴミ")) color = "#FF5252";
+            else if (tagStr.includes("トイレ")) color = "#448AFF";
+            else if (tagStr.includes("給水")) color = "#00BCD4";
+
+            const icon = L.divIcon({
+                html: `<div style="background:${color}; width:16px; height:16px; border:2px solid white; border-radius:50%; box-shadow:0 0 5px rgba(0,0,0,0.3);"></div>`,
+                className: ''
+            });
+
+            const popup = `
+                <div style="min-width:160px">
+                    <b>${d.name || '未設定'}</b><br><small>タグ: ${d.tag || 'なし'}</small>
+                    <p style="font-size:12px; margin:5px 0;">${d.memo || ''}</p>
+                    <button class="edit-btn" onclick="editPin('${d.id}')" style="width:100%; color:white; border:none; padding:8px; border-radius:4px; margin-bottom:5px; cursor:pointer;">✏️ 編集</button>
+                    <button class="del-btn" onclick="deletePin('${d.id}')" style="width:100%; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer;">🗑️ 削除</button>
+                </div>`;
+            L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popup);
+        });
+    }
+
+    // イベント登録（ドロップダウン変更時）
+    document.getElementById('tag-filter').addEventListener('change', renderMarkers);
+
+    // 3. Firebaseからデータ取得
+    db.collection("bins").onSnapshot(snap => {
+        allData = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        updateAutoTagDropdown();
+        renderMarkers();
+    }, err => {
+        console.error("Firebase Error:", err);
+    });
+
+    // 住所検索
+    async function searchAddress() {
+        const addr = document.getElementById('address-input').value;
+        if (!addr) return alert("住所を入力してください");
+        try {
+            const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addr)}`);
+            const data = await res.json();
+            if (data && data.length > 0) {
+                map.flyTo([data[0].lat, data[0].lon], 16);
+            } else { alert("見つかりませんでした。"); }
+        } catch (e) { alert("検索エラーです"); }
+    }
+
+    // 編集・削除・追加
+    window.editPin = async (id) => {
+        const item = allData.find(d => d.id === id);
+        if (!item) return;
+        const n = prompt("名前を編集:", item.name); if(n === null) return;
+        const m = prompt("メモを編集:", item.memo); if(m === null) return;
+        const t = prompt("タグを編集:", item.tag); if(t === null) return;
+        await db.collection("bins").doc(id).update({ name: n, memo: m, tag: t });
+    };
+
+    window.deletePin = async (id) => {
+        if (confirm("削除しますか？")) await db.collection("bins").doc(id).delete();
+    };
+
+    map.on('click', async e => {
+        const n = prompt("名前:"); if (!n) return;
+        const t = prompt("タグを入力（ゴミ箱、給水器、トイレなど）:", "給水器");
+        const m = prompt("メモ:");
+        await db.collection("bins").add({ lat: e.latlng.lat, lng: e.latlng.lng, name: n, tag: t || "未分類", memo: m || "" });
+    });
+
+</script>
+</body>
+</html>
