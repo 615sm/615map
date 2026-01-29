@@ -104,33 +104,41 @@
         renderMarkers();
     });
 
-    function renderMarkers() {
-        markersLayer.clearLayers();
-        const filter = document.getElementById('tag-filter').value;
-        allData.forEach(d => {
-            if (filter && d.tag !== filter) return;
-            if (d.tag === "テスト" || !d.lat || !d.lng) return;
+   function renderMarkers() {
+    markersLayer.clearLayers();
+    const filter = document.getElementById('tag-filter').value;
 
-            let color = "#9E9E9E";
-            if (d.tag.includes("ゴミ")) color = "#FF5252";
-            else if (d.tag.includes("トイレ")) color = "#448AFF";
-            else if (d.tag.includes("給水")) color = "#00BCD4";
+    allData.forEach(d => {
+        // --- ここから修正：絞り込みの判定を甘くする ---
+        if (filter) {
+            // 選択したタグ（例：給水所）が、データのタグに含まれているかチェック
+            if (!d.tag || !d.tag.includes(filter)) return;
+        }
+        // --- 修正ここまで ---
 
-            const icon = L.divIcon({
-                html: `<div style="background:${color}; width:16px; height:16px; border:2px solid white; border-radius:50%; box-shadow:0 0 5px rgba(0,0,0,0.3);"></div>`,
-                className: ''
-            });
+        if (d.tag === "テスト" || !d.lat || !d.lng) return;
 
-            const popup = `
-                <div style="min-width:160px">
-                    <b>${d.name || '未設定'}</b><br><small>${d.tag}</small>
-                    <p style="font-size:12px; margin:5px 0;">${d.memo || ''}</p>
-                    <button class="edit-btn" onclick="editPin('${d.id}')" style="width:100%; color:white; border:none; padding:5px; border-radius:4px; margin-bottom:5px;">✏️ 編集</button>
-                    <button class="del-btn" onclick="deletePin('${d.id}')" style="width:100%; color:white; border:none; padding:5px; border-radius:4px;">🗑️ 削除</button>
-                </div>`;
-            L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popup);
+        let color = "#9E9E9E";
+        // 色分けの判定も「含む」に変更して安定させます
+        if (d.tag.includes("ゴミ")) color = "#FF5252";
+        else if (d.tag.includes("トイレ")) color = "#448AFF";
+        else if (d.tag.includes("給水")) color = "#00BCD4";
+
+        const icon = L.divIcon({
+            html: `<div style="background:${color}; width:16px; height:16px; border:2px solid white; border-radius:50%; box-shadow:0 0 5px rgba(0,0,0,0.3);"></div>`,
+            className: ''
         });
-    }
+
+        const popup = `
+            <div style="min-width:160px">
+                <b>${d.name || '未設定'}</b><br><small>タグ: ${d.tag}</small>
+                <p style="font-size:12px; margin:5px 0;">${d.memo || ''}</p>
+                <button class="edit-btn" onclick="editPin('${d.id}')" style="width:100%; color:white; border:none; padding:5px; border-radius:4px; margin-bottom:5px; cursor:pointer;">✏️ 編集</button>
+                <button class="del-btn" onclick="deletePin('${d.id}')" style="width:100%; color:white; border:none; padding:5px; border-radius:4px; cursor:pointer;">🗑️ 削除</button>
+            </div>`;
+        L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popup);
+    });
+}
 
     window.editPin = async (id) => {
         const item = allData.find(d => d.id === id);
