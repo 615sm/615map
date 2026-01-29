@@ -122,3 +122,48 @@
             });
 
             const popup = `
+                <div style="min-width:160px">
+                    <b>${d.name || '未設定'}</b><br><small>${d.tag}</small>
+                    <p style="font-size:12px; margin:5px 0;">${d.memo || ''}</p>
+                    <button class="edit-btn" onclick="editPin('${d.id}')" style="width:100%; color:white; border:none; padding:5px; border-radius:4px; margin-bottom:5px;">✏️ 編集</button>
+                    <button class="del-btn" onclick="deletePin('${d.id}')" style="width:100%; color:white; border:none; padding:5px; border-radius:4px;">🗑️ 削除</button>
+                </div>`;
+            L.marker([d.lat, d.lng], {icon}).addTo(markersLayer).bindPopup(popup);
+        });
+    }
+
+    window.editPin = async (id) => {
+        const item = allData.find(d => d.id === id);
+        const n = prompt("名前:", item.name); if(n === null) return;
+        const m = prompt("メモ:", item.memo); if(m === null) return;
+        const t = prompt(`タグ (${currentTags.join(',')}):`, item.tag); if(t === null) return;
+        await db.collection("bins").doc(id).update({ name: n, memo: m, tag: t });
+    };
+
+    async function addNewTag() {
+        const t = prompt("新しいタグ名:");
+        if (t && !currentTags.includes(t)) {
+            currentTags.push(t);
+            await db.collection("settings").doc("tags").update({ list: currentTags });
+        }
+    }
+
+    async function deleteCurrentTag() {
+        const t = document.getElementById('tag-filter').value;
+        if (!t || !confirm(`${t}を消しますか？`)) return;
+        await db.collection("settings").doc("tags").update({ list: currentTags.filter(x => x !== t) });
+    }
+
+    map.on('click', async e => {
+        const n = prompt("名前:"); if (!n) return;
+        const t = prompt(`タグ (${currentTags.join(',')}):`, "ゴミ箱");
+        const m = prompt("メモ:");
+        await db.collection("bins").add({ lat: e.latlng.lat, lng: e.latlng.lng, name: n, tag: t || "未分類", memo: m || "" });
+    });
+
+    window.deletePin = async (id) => {
+        if (confirm("削除しますか？")) await db.collection("bins").doc(id).delete();
+    };
+</script>
+</body>
+</html>
